@@ -1,0 +1,84 @@
+name: Generate Profile Assets
+
+on:
+  schedule:
+    - cron: "0 */12 * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: profile-assets
+  cancel-in-progress: true
+
+env:
+  HAS_PAT: ${{ secrets.PROFILE_TOKEN != '' }}
+  TOKEN: ${{ secrets.PROFILE_TOKEN || secrets.GITHUB_TOKEN }}
+  LANGS: username=${{ github.repository_owner }}&layout=compact&langs_count=8&hide_border=true&size_weight=0.5&count_weight=0.5&hide=html,css,scss,mdx,shell,batchfile,makefile,cmake,assembly&card_width=420
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Generate snake SVGs
+        uses: Platane/snk@v3
+        with:
+          github_user_name: ${{ github.repository_owner }}
+          outputs: |
+            dist/github-contribution-grid-snake.svg
+            dist/github-contribution-grid-snake-dark.svg?palette=github-dark
+
+      - name: Fix dist ownership
+        run: sudo chown -R "$(id -u):$(id -g)" dist
+
+      - name: Top languages (dark)
+        if: env.HAS_PAT == 'true'
+        uses: stats-organization/github-readme-stats-action@v2
+        with:
+          card: top-langs
+          options: ${{ env.LANGS }}&bg_color=0D1117&title_color=58a6ff&text_color=c9d1d9
+          path: dist/top-langs-dark.svg
+          token: ${{ env.TOKEN }}
+          fail_on_error: "true"
+
+      - name: Top languages (light)
+        if: env.HAS_PAT == 'true'
+        uses: stats-organization/github-readme-stats-action@v2
+        with:
+          card: top-langs
+          options: ${{ env.LANGS }}&bg_color=ffffff&title_color=0969da&text_color=1f2328
+          path: dist/top-langs-light.svg
+          token: ${{ env.TOKEN }}
+          fail_on_error: "true"
+
+      - name: Generate 3D contribution graph
+        uses: yoshi389111/github-profile-3d-contrib@v0.9.3
+        env:
+          GITHUB_TOKEN: ${{ env.TOKEN }}
+          USERNAME: ${{ github.repository_owner }}
+
+      - name: Collect 3D contribution graph
+        run: |
+          cp profile-3d-contrib/profile-night-rainbow.svg dist/contrib-3d-dark.svg
+          cp profile-3d-contrib/profile-season-animate.svg dist/contrib-3d-light.svg
+
+      - name: Strip public-only charts
+        if: env.HAS_PAT != 'true'
+        run: |
+          python3 repo/.github/scripts/clean-contrib.py dist/contrib-3d-dark.svg dist/contrib-3d-light.svg
+
+      - name: Push to output branch
+        uses: crazy-max/ghaction-github-pages@v4
+        with:
+          target_branch: output
+          build_dir: dist
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
